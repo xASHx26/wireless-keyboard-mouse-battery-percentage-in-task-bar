@@ -1,28 +1,49 @@
+<div align="center">
+  <img src="assets/peripheral-battery.svg" width="100%" alt="Peripheral Battery — mouse and keyboard charge in the Windows tray">
+</div>
+
 # Peripheral Battery
 
-Double-click **PeripheralBattery.exe** on Windows 10 or 11. The app runs in the notification area with two icons. The black-and-white mouse and keyboard icons show a charge bar below each symbol. Hover over either icon for the exact percentage. A dash inside the bar means no reading is available.
+Peripheral Battery puts a mouse icon and a keyboard icon in the Windows system tray. Each icon has a charge bar. Hover over an icon for the exact percentage, or right-click either icon to see all detected devices.
 
-If you find the icons behind the taskbar arrow, open the overflow and drag both icons onto the visible taskbar. On Windows 11 you can also use **Settings → Personalization → Taskbar → Other system tray icons**. Windows controls their exact placement.
+## Get started
 
-Hover for a summary or right-click either icon for individual device readings, manual refresh, taskbar settings, and exit. The app refreshes every minute. Each icon shows the lowest available percentage if several devices of that type are detected.
+1. On Windows 10 or 11, open PowerShell in the project folder and run `.\Build.ps1`. The script uses the Windows .NET Framework C# compiler and creates `PeripheralBattery.exe` in the same folder.
+2. Open `PeripheralBattery.exe`. The app runs in the system tray.
+3. If the icons appear behind the taskbar arrow, drag them from the hidden-icons menu onto the visible tray. On Windows 11, you can also enable both `PeripheralBattery.exe` entries under **Settings → Personalization → Taskbar → Other system tray icons**.
 
-## Compatibility
+## Keep the mouse battery reading fresh
 
-The app reads the battery percentage Windows exposes for connected Bluetooth, USB and receiver devices. It also queries the documented battery status interface on supported AJAZZ/Attack Shark 2.4 GHz receivers with USB ID 3151:402D. The app shows a live reading when available. If the receiver returns a retained percentage while the mouse is idle, the tooltip and tray menu label it as last reported. The app also keeps the last valid reading for that receiver during the current session if a later query fails. Many other 2.4 GHz receivers use model-specific protocols, and battery-free wired devices have no charge level.
+Leave the app running. It checks battery levels every **60 seconds**. For your **AJAZZ AJ159 PRO** on its 2.4 GHz receiver, move the mouse to wake it, then right-click the mouse tray icon and select **Refresh battery levels**. After charging, use the mouse briefly before refreshing so the receiver has a chance to report a new level.
 
-References for [Windows notification area behavior](https://learn.microsoft.com/en-us/windows/win32/shell/notification-area), the [Windows battery property](https://learn.microsoft.com/en-us/windows/win32/properties/props-system-devices-batterylife), and the [Rongyuan status report](https://github.com/qu1ncky/BatteryTray#how-it-works).
+| Tray status | Meaning |
+| --- | --- |
+| `81%` | The device or receiver supplied a usable battery reading. |
+| `81% (last reported)` | The receiver retained an earlier value, or the app reused the last valid reading from the current session. The actual charge may have changed. |
+| Dash inside the bar | No usable battery reading is available yet. |
 
-## Build and diagnose
+Polling can only show a new percentage when the device or receiver makes fresh battery data available. The bar is approximate. Hover over it for the exact value. When multiple devices of the same type are detected, the bar shows the lowest available reading.
 
-From PowerShell in this folder, run:
+## Device compatibility
+
+- **Bluetooth:** Uses the battery percentage Windows exposes for the device.
+- **2.4 GHz:** Uses Windows' reported battery level where available. The app can also query the battery status interface on supported AJAZZ and Attack Shark receivers with USB ID `3151:402D`. Other proprietary receivers may require model-specific support.
+- **USB:** Shows a percentage when Windows reports one for a rechargeable peripheral. Battery-free wired devices have no charge level.
+
+## Diagnostics
+
+To print the detected devices and their battery status from PowerShell, run:
 
 ```powershell
-.\Build.ps1
 .\Build.ps1 -Console
 .\PeripheralBattery-Diagnostics.exe --list
 ```
 
-The build uses the Windows .NET Framework C# compiler. The console build is optional.
+The output lists each device's type, name, connection, and battery status. Keep the mouse awake in its current connection mode when collecting diagnostics. Both build outputs are ignored by Git.
 
+## References
 
+- [Windows notification area](https://learn.microsoft.com/en-us/windows/win32/shell/notification-area)
+- [Windows device battery property](https://learn.microsoft.com/en-us/windows/win32/properties/props-system-devices-batterylife)
+- [Rongyuan receiver status report](https://github.com/qu1ncky/BatteryTray#how-it-works)
 
