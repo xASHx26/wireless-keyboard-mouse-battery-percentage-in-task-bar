@@ -106,6 +106,39 @@ namespace PeripheralBattery
             }
             catch { }
         }
+
+        public static bool IsStartupEnabled()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", false))
+                {
+                    return key != null && key.GetValue("PeripheralBattery") != null;
+                }
+            }
+            catch { return false; }
+        }
+
+        public static void SetStartupEnabled(bool enable)
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
+                {
+                    if (key == null) return;
+                    if (enable)
+                    {
+                        string exePath = "\"" + System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PeripheralBattery.exe") + "\"";
+                        key.SetValue("PeripheralBattery", exePath);
+                    }
+                    else
+                    {
+                        key.DeleteValue("PeripheralBattery", false);
+                    }
+                }
+            }
+            catch { }
+        }
     }
 
     internal sealed class BatteryTray : ApplicationContext
@@ -320,6 +353,18 @@ namespace PeripheralBattery
                 settings.Save();
             };
             menu.Items.Add(hideNoBatItem);
+
+            var startupItem = new ToolStripMenuItem("Start with Windows")
+            {
+                Checked = AppSettings.IsStartupEnabled(),
+                CheckOnClick = false
+            };
+            startupItem.Click += (sender, args) =>
+            {
+                bool newState = !AppSettings.IsStartupEnabled();
+                AppSettings.SetStartupEnabled(newState);
+            };
+            menu.Items.Add(startupItem);
 
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(refresh);
