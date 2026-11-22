@@ -151,12 +151,28 @@ namespace PeripheralBattery
         private readonly ContextMenuStrip menu = new ContextMenuStrip { ShowCheckMargin = true, ShowImageMargin = false };
         private List<Peripheral> devices = new List<Peripheral>();
         private string scanStatus = "Checking connected devices…";
+        private bool preventClose = false;
 
         public BatteryTray()
         {
             mouse.Icon.ContextMenuStrip = menu;
             keyboard.Icon.ContextMenuStrip = menu;
             menu.Opening += (sender, args) => { PopulateMenu(); args.Cancel = false; };
+            menu.ItemClicked += (sender, args) =>
+            {
+                if (args.ClickedItem != null && (args.ClickedItem.Tag as string == "keepOpen" || (args.ClickedItem.Tag as string ?? "").StartsWith("device")))
+                {
+                    preventClose = true;
+                }
+            };
+            menu.Closing += (sender, args) =>
+            {
+                if (args.CloseReason == ToolStripDropDownCloseReason.ItemClicked && preventClose)
+                {
+                    args.Cancel = true;
+                    preventClose = false;
+                }
+            };
             refresh.Click += (sender, args) => Refresh();
             poll.Interval = 60000;
             poll.Tick += (sender, args) => Refresh();
@@ -266,20 +282,25 @@ namespace PeripheralBattery
                     var devItem = new ToolStripMenuItem(label)
                     {
                         Checked = isIncluded,
-                        CheckOnClick = false
+                        CheckOnClick = false,
+                        Tag = captured.Level.HasValue ? "device_hasbat" : "device_nobat"
                     };
                     devItem.Click += (sender, args) =>
                     {
                         string key = !string.IsNullOrEmpty(captured.Id) ? captured.Id : captured.Name;
+                        bool willBeIncluded;
                         if (settings.ExcludedDevices.Contains(key) || settings.ExcludedDevices.Contains(captured.Name))
                         {
                             settings.ExcludedDevices.Remove(key);
                             settings.ExcludedDevices.Remove(captured.Name);
+                            willBeIncluded = true;
                         }
                         else
                         {
                             settings.ExcludedDevices.Add(key);
+                            willBeIncluded = false;
                         }
+                        devItem.Checked = willBeIncluded;
                         settings.Save();
                         RefreshUi();
                     };
@@ -296,7 +317,8 @@ namespace PeripheralBattery
             var mouseItem = new ToolStripMenuItem("Mouse tray icon")
             {
                 Checked = settings.ShowMouseIcon,
-                CheckOnClick = false
+                CheckOnClick = false,
+                Tag = "keepOpen"
             };
             mouseItem.Click += (sender, args) =>
             {
@@ -306,6 +328,7 @@ namespace PeripheralBattery
                     return;
                 }
                 settings.ShowMouseIcon = !settings.ShowMouseIcon;
+                mouseItem.Checked = settings.ShowMouseIcon;
                 settings.Save();
                 UpdateTrayVisibility();
             };
@@ -314,7 +337,8 @@ namespace PeripheralBattery
             var kbItem = new ToolStripMenuItem("Keyboard tray icon")
             {
                 Checked = settings.ShowKeyboardIcon,
-                CheckOnClick = false
+                CheckOnClick = false,
+                Tag = "keepOpen"
             };
             kbItem.Click += (sender, args) =>
             {
@@ -324,6 +348,7 @@ namespace PeripheralBattery
                     return;
                 }
                 settings.ShowKeyboardIcon = !settings.ShowKeyboardIcon;
+                kbItem.Checked = settings.ShowKeyboardIcon;
                 settings.Save();
                 UpdateTrayVisibility();
             };
@@ -332,11 +357,13 @@ namespace PeripheralBattery
             var autoHideItem = new ToolStripMenuItem("Auto-hide icon if battery unavailable")
             {
                 Checked = settings.AutoHideUnavailable,
-                CheckOnClick = false
+                CheckOnClick = false,
+                Tag = "keepOpen"
             };
             autoHideItem.Click += (sender, args) =>
             {
                 settings.AutoHideUnavailable = !settings.AutoHideUnavailable;
+                autoHideItem.Checked = settings.AutoHideUnavailable;
                 settings.Save();
                 UpdateTrayVisibility();
             };
@@ -345,24 +372,35 @@ namespace PeripheralBattery
             var hideNoBatItem = new ToolStripMenuItem("Hide devices without battery in menu")
             {
                 Checked = settings.HideUnavailableDevices,
-                CheckOnClick = false
+                CheckOnClick = false,
+                Tag = "keepOpen"
             };
             hideNoBatItem.Click += (sender, args) =>
             {
                 settings.HideUnavailableDevices = !settings.HideUnavailableDevices;
+                hideNoBatItem.Checked = settings.HideUnavailableDevices;
                 settings.Save();
+                foreach (ToolStripItem it in menu.Items)
+                {
+                    if (it.Tag as string == "device_nobat")
+                    {
+                        it.Visible = !settings.HideUnavailableDevices;
+                    }
+                }
             };
             menu.Items.Add(hideNoBatItem);
 
             var startupItem = new ToolStripMenuItem("Start with Windows")
             {
                 Checked = AppSettings.IsStartupEnabled(),
-                CheckOnClick = false
+                CheckOnClick = false,
+                Tag = "keepOpen"
             };
             startupItem.Click += (sender, args) =>
             {
                 bool newState = !AppSettings.IsStartupEnabled();
                 AppSettings.SetStartupEnabled(newState);
+                startupItem.Checked = newState;
             };
             menu.Items.Add(startupItem);
 
