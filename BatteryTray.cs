@@ -50,13 +50,72 @@ namespace PeripheralBattery
         }
     }
 
+    internal sealed class AppSettings
+    {
+        private static readonly string SettingsFile = System.IO.Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "settings.ini");
+
+        public bool ShowMouseIcon = true;
+        public bool ShowKeyboardIcon = true;
+        public bool AutoHideUnavailable = false;
+        public bool HideUnavailableDevices = false;
+        public readonly HashSet<string> ExcludedDevices = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        public static AppSettings Load()
+        {
+            var s = new AppSettings();
+            try
+            {
+                if (System.IO.File.Exists(SettingsFile))
+                {
+                    foreach (string line in System.IO.File.ReadAllLines(SettingsFile))
+                    {
+                        int eq = line.IndexOf('=');
+                        if (eq <= 0) continue;
+                        string key = line.Substring(0, eq).Trim();
+                        string val = line.Substring(eq + 1).Trim();
+                        if (key.Equals("ShowMouseIcon", StringComparison.OrdinalIgnoreCase))
+                            s.ShowMouseIcon = val.Equals("true", StringComparison.OrdinalIgnoreCase);
+                        else if (key.Equals("ShowKeyboardIcon", StringComparison.OrdinalIgnoreCase))
+                            s.ShowKeyboardIcon = val.Equals("true", StringComparison.OrdinalIgnoreCase);
+                        else if (key.Equals("AutoHideUnavailable", StringComparison.OrdinalIgnoreCase))
+                            s.AutoHideUnavailable = val.Equals("true", StringComparison.OrdinalIgnoreCase);
+                        else if (key.Equals("HideUnavailableDevices", StringComparison.OrdinalIgnoreCase))
+                            s.HideUnavailableDevices = val.Equals("true", StringComparison.OrdinalIgnoreCase);
+                        else if (key.Equals("ExcludedDevice", StringComparison.OrdinalIgnoreCase) && val.Length > 0)
+                            s.ExcludedDevices.Add(val);
+                    }
+                }
+            }
+            catch { }
+            return s;
+        }
+
+        public void Save()
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("ShowMouseIcon=" + (ShowMouseIcon ? "true" : "false"));
+                sb.AppendLine("ShowKeyboardIcon=" + (ShowKeyboardIcon ? "true" : "false"));
+                sb.AppendLine("AutoHideUnavailable=" + (AutoHideUnavailable ? "true" : "false"));
+                sb.AppendLine("HideUnavailableDevices=" + (HideUnavailableDevices ? "true" : "false"));
+                foreach (string dev in ExcludedDevices)
+                    sb.AppendLine("ExcludedDevice=" + dev);
+                System.IO.File.WriteAllText(SettingsFile, sb.ToString());
+            }
+            catch { }
+        }
+    }
+
     internal sealed class BatteryTray : ApplicationContext
     {
+        private readonly AppSettings settings = AppSettings.Load();
         private readonly TrayIndicator mouse = new TrayIndicator("Mouse");
         private readonly TrayIndicator keyboard = new TrayIndicator("Keyboard");
         private readonly System.Windows.Forms.Timer poll = new System.Windows.Forms.Timer();
         private readonly ToolStripMenuItem refresh = new ToolStripMenuItem("Refresh battery levels");
-        private readonly ContextMenuStrip menu = new ContextMenuStrip { ShowImageMargin = false };
+        private readonly ContextMenuStrip menu = new ContextMenuStrip { ShowCheckMargin = true, ShowImageMargin = false };
         private List<Peripheral> devices = new List<Peripheral>();
         private string scanStatus = "Checking connected devices…";
 
@@ -78,6 +137,46 @@ namespace PeripheralBattery
             Refresh();
         }
 
+        private bool IsDeviceExcluded(Peripheral d)
+        {
+            if (settings.ExcludedDevices.Contains(d.Name)) return true;
+            if (!string.IsNullOrEmpty(d.Id) && settings.ExcludedDevices.Contains(d.Id)) return true;
+            return false;
+        }
+
+        private void UpdateTrayVisibility()
+        {
+            bool hasMouseBattery = devices.Any(d => d.Kind == "Mouse" && d.Level.HasValue && !IsDeviceExcluded(d));
+            bool hasKeyboardBattery = devices.Any(d => d.Kind == "Keyboard" && d.Level.HasValue && !IsDeviceExcluded(d));
+
+            bool mouseVisible = settings.ShowMouseIcon;
+            bool keyboardVisible = settings.ShowKeyboardIcon;
+
+            if (settings.AutoHideUnavailable)
+            {
+                if (!hasMouseBattery) mouseVisible = false;
+                if (!hasKeyboardBattery) keyboardVisible = false;
+            }
+
+            // Ensure at least one icon remains visible so user can access menu
+            if (!mouseVisible && !keyboardVisible)
+            {
+                if (hasMouseBattery || settings.ShowMouseIcon) mouseVisible = true;
+                else keyboardVisible = true;
+            }
+
+            mouse.Icon.Visible = mouseVisible;
+            keyboard.Icon.Visible = keyboardVisible;
+        }
+
+        private void RefreshUi()
+        {
+            var activeDevices = devices.Where(d => !IsDeviceExcluded(d)).ToList();
+            mouse.Update(activeDevices, scanStatus);
+            keyboard.Update(activeDevices, scanStatus);
+            UpdateTrayVisibility();
+        }
+
         private async void Refresh()
         {
             if (!refresh.Enabled) return;
@@ -96,8 +195,7 @@ namespace PeripheralBattery
             }
 
             if (menu.IsDisposed) return;
-            mouse.Update(devices, scanStatus);
-            keyboard.Update(devices, scanStatus);
+            RefreshUi();
             refresh.Enabled = true;
             if (menu.Visible) PopulateMenu();
         }
@@ -111,13 +209,118 @@ namespace PeripheralBattery
                 if (item != refresh) item.Dispose();
             }
 
-            if (scanStatus != null) menu.Items.Add(scanStatus).Enabled = false;
-            foreach (Peripheral device in devices)
+            if (scanStatus != null)
             {
-                // Escape ampersands so product names are displayed literally.
-                string name = device.Name.Replace("&", "&&");
-                menu.Items.Add(device.Kind + " · " + name + " · " + device.Status).Enabled = false;
+                var scanItem = new ToolStripMenuItem(scanStatus) { Enabled = false };
+                menu.Items.Add(scanItem);
             }
+
+            var shownDevices = settings.HideUnavailableDevices
+                ? devices.Where(d => d.Level.HasValue).ToList()
+                : devices;
+
+            if (shownDevices.Count > 0)
+            {
+                var devHeader = new ToolStripMenuItem("Devices (checked stay active):") { Enabled = false };
+                menu.Items.Add(devHeader);
+
+                foreach (Peripheral device in shownDevices)
+                {
+                    Peripheral captured = device;
+                    bool isIncluded = !IsDeviceExcluded(captured);
+                    string name = captured.Name.Replace("&", "&&");
+                    string label = captured.Kind + " · " + name + " · " + captured.Status;
+                    var devItem = new ToolStripMenuItem(label)
+                    {
+                        Checked = isIncluded,
+                        CheckOnClick = false
+                    };
+                    devItem.Click += (sender, args) =>
+                    {
+                        string key = !string.IsNullOrEmpty(captured.Id) ? captured.Id : captured.Name;
+                        if (settings.ExcludedDevices.Contains(key) || settings.ExcludedDevices.Contains(captured.Name))
+                        {
+                            settings.ExcludedDevices.Remove(key);
+                            settings.ExcludedDevices.Remove(captured.Name);
+                        }
+                        else
+                        {
+                            settings.ExcludedDevices.Add(key);
+                        }
+                        settings.Save();
+                        RefreshUi();
+                    };
+                    menu.Items.Add(devItem);
+                }
+            }
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            // Tray Icons options
+            var trayHeader = new ToolStripMenuItem("Tray icons (checked stay visible):") { Enabled = false };
+            menu.Items.Add(trayHeader);
+
+            var mouseItem = new ToolStripMenuItem("Mouse tray icon")
+            {
+                Checked = settings.ShowMouseIcon,
+                CheckOnClick = false
+            };
+            mouseItem.Click += (sender, args) =>
+            {
+                if (settings.ShowMouseIcon && !settings.ShowKeyboardIcon)
+                {
+                    MessageBox.Show("At least one tray icon must remain enabled.", "Peripheral Battery", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                settings.ShowMouseIcon = !settings.ShowMouseIcon;
+                settings.Save();
+                UpdateTrayVisibility();
+            };
+            menu.Items.Add(mouseItem);
+
+            var kbItem = new ToolStripMenuItem("Keyboard tray icon")
+            {
+                Checked = settings.ShowKeyboardIcon,
+                CheckOnClick = false
+            };
+            kbItem.Click += (sender, args) =>
+            {
+                if (settings.ShowKeyboardIcon && !settings.ShowMouseIcon)
+                {
+                    MessageBox.Show("At least one tray icon must remain enabled.", "Peripheral Battery", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                settings.ShowKeyboardIcon = !settings.ShowKeyboardIcon;
+                settings.Save();
+                UpdateTrayVisibility();
+            };
+            menu.Items.Add(kbItem);
+
+            var autoHideItem = new ToolStripMenuItem("Auto-hide icon if battery unavailable")
+            {
+                Checked = settings.AutoHideUnavailable,
+                CheckOnClick = false
+            };
+            autoHideItem.Click += (sender, args) =>
+            {
+                settings.AutoHideUnavailable = !settings.AutoHideUnavailable;
+                settings.Save();
+                UpdateTrayVisibility();
+            };
+            menu.Items.Add(autoHideItem);
+
+            var hideNoBatItem = new ToolStripMenuItem("Hide devices without battery in menu")
+            {
+                Checked = settings.HideUnavailableDevices,
+                CheckOnClick = false
+            };
+            hideNoBatItem.Click += (sender, args) =>
+            {
+                settings.HideUnavailableDevices = !settings.HideUnavailableDevices;
+                settings.Save();
+            };
+            menu.Items.Add(hideNoBatItem);
+
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(refresh);
             menu.Items.Add("Taskbar settings", null, (sender, args) =>

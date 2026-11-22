@@ -9,6 +9,7 @@ namespace PeripheralBattery
 {
     internal sealed class Peripheral
     {
+        public string Id;
         public string Name;
         public string Kind;
         public string Connection;
@@ -88,7 +89,8 @@ namespace PeripheralBattery
                 string name = StringProperty(preferred.Handle, FriendlyName) ?? StringProperty(preferred.Handle, Model) ??
                     StringProperty(preferred.Handle, Name) ?? StringProperty(group.First().Handle, Name) ?? "Input device";
                 bool isMouse = group.Key.SetupClass == MouseClass;
-                bool knownMouseReceiver = usb != null && ReceiverBattery.IsRongyuanMouse(usb.Id);
+                bool knownMouseReceiver = usb != null && (ReceiverBattery.IsRongyuanMouse(usb.Id) || ReceiverBattery.IsNacodexMouse(usb.Id));
+                bool isNacodexReceiver = usb != null && ReceiverBattery.IsNacodexMouse(usb.Id);
                 // These models expose an extra HID collection for shortcuts or pointer controls.
                 if (knownMouseReceiver && !isMouse) continue;
                 if (bluetooth != null && isMouse && name.StartsWith("AK820 ", StringComparison.OrdinalIgnoreCase))
@@ -98,7 +100,9 @@ namespace PeripheralBattery
                 {
                     foreach (Node member in members)
                     {
-                        level = ReceiverBattery.ReadRongyuanMouse(member.Id, out lastReported);
+                        level = isNacodexReceiver
+                            ? ReceiverBattery.ReadNacodexMouse(member.Id, out lastReported)
+                            : ReceiverBattery.ReadRongyuanMouse(member.Id, out lastReported);
                         if (level.HasValue) break;
                     }
                 }
@@ -119,6 +123,7 @@ namespace PeripheralBattery
 
                 results.Add(new Peripheral
                 {
+                    Id = group.Key.Identity,
                     Kind = group.Key.SetupClass == MouseClass ? "Mouse" : "Keyboard",
                     Name = name,
                     Connection = bluetooth != null ? "Bluetooth" : knownMouseReceiver ? "2.4 GHz receiver" :
